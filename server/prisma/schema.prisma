@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectSource {
+  zip
+  github
+}
+
+enum ImportStatus {
+  pending
+  extracting
+  inspecting
+  ready
+  failed
+}
+
+enum RunStatus {
+  queued
+  inspecting
+  baseline_running
+  diagnosing
+  planning
+  patching
+  verifying
+  retrying
+  completed_verified
+  completed_unverified
+  failed
+  cancelled
+}
+
+enum RunOutcome {
+  verified
+  unverified
+  failed
+  not_reproduced
+  cancelled
+}
+
+model User {
+  id                 String        @id @default(cuid())
+  clerkId            String        @unique
+  email              String?
+  createdAt          DateTime      @default(now())
+  githubTokenEnc     String?
+  githubLogin        String?
+  settings           UserSettings?
+  projects           Project[]
+  runs               RepairRun[]
+  websiteInspections WebsiteInspection[]
+  previews           PreviewSession[]
+}
+
+model UserSettings {
+  userId          String  @id
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  maxRetries      Int     @default(2)
+  timeoutSeconds  Int     @default(600)
+  vultrModel      String?
+  geminiModel     String?
+  allowInstallNet Boolean @default(true)
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  source         ProjectSource
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  installCommand String?
+  buildCommand   String?
+  testCommand    String?
+  sandboxImage   String?
+  inspection     Json?
+  imports        ProjectImport[]
+  repository     Repository?
+  runs           RepairRun[]
+
+  @@index([userId])
+}
+
+model ProjectImport {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      ImportStatus @default(pending)
+  error       String?
+  archiveKey  String?
+  sourceKey   String?
+  fileCount   Int?
+  totalBytes  BigInt?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+}
+
+model Repository {
+  projectId String   @id
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner     String
+  repo      String
+  branch    String
+  commitSha String?
+  isPrivate Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model RepairRun {
+  id              String              @id @default(cuid())
+  projectId       String
+  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status          RunStatus           @default(queued)
+  outcome         RunOutcome?
+  config          Json
+  attempt         Int                 @default(0)
+  maxRetries      Int
+  cancelRequested Boolean             @default(false)
+  error           String?
+  summary         String?
+  workerId        String?
+  createdAt       DateTime            @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  steps           RunStep[]
+  logs            RunLog[]
+  diagnoses       Diagnosis[]
+  plans           RepairPlan[]
+  patches         Patch[]
+  verifications   VerificationResult[]
+  artifacts       Artifact[]
+  previews        PreviewSession[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model RunStep {
+  id         String    @id @default(cuid())
+  runId      String
+  run        RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  name       String
+  status     String
+  attempt    Int       @default(0)
+  detail     String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+}
+
+model RunLog {
+  id         String    @id @default(cuid())
+  runId      String
+  run        RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  seq        Int       @default(autoincrement())
+  phase      String
+  command    String?
+  exitCode   Int?
+  durationMs Int?
+  stdout     String?
+  stderr     String?
+  message    String?
+  fullLogKey String?
+  timedOut   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([runId, seq])
+}
+
+model Diagnosis {
+  id            String    @id @default(cuid())
+  runId         String
+  run           RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt       Int
+  rootCause     String
+  evidence      Json
+  affectedFiles Json
+  confidence    String?
+  model         String
+  usage         Json?
+  createdAt     DateTime  @default(now())
+}
+
+model RepairPlan {
+  id        String    @id @default(cuid())
+  runId     String
+  run       RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt   Int
+  steps     Json
+  createdAt DateTime  @default(now())
+}
+
+model Patch {
+  id           String    @id @default(cuid())
+  runId        String
+  run          RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt      Int
+  changed      Json
+  created      Json
+  deleted      Json
+  explanations Json
+  diff         String
+  rejected     Json?
+  createdAt    DateTime  @default(now())
+}
+
+model VerificationResult {
+  id        String    @id @default(cuid())
+  runId     String
+  run       RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt   Int
+  phase     String
+  command   String
+  exitCode  Int?
+  passed    Boolean
+  baseline  Boolean
+  timedOut  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+}
+
+model Artifact {
+  id        String    @id @default(cuid())
+  runId     String
+  run       RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  kind      String
+  key       String
+  sizeBytes BigInt?
+  createdAt DateTime  @default(now())
+}
+
+model WebsiteInspection {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url       String
+  result    Json
+  createdAt DateTime @default(now())
+}
+
+/// Live Preview session. Access token is stored only as a SHA-256 hash.
+model PreviewSession {
+  id         String    @id
+  runId      String
+  run        RepairRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  projectId  String
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status     String    @default("starting")
+  framework  String
+  tokenHash  String
+  error      String?
+  createdAt  DateTime  @default(now())
+  readyAt    DateTime?
+  expiresAt  DateTime
+  stoppedAt  DateTime?
+
+  @@index([userId, status])
+  @@index([runId])
+  @@index([status, expiresAt])
+}

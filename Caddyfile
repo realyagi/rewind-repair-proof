@@ -1,0 +1,17 @@
+:80 {
+	# Live Preview: "<id>-<token>.<PREVIEW_BASE_DOMAIN>" hosts go to the API preview proxy, which
+	# validates the token and forwards only to the sandbox. Must stay a different site from the app.
+	@preview host *.{$PREVIEW_BASE_DOMAIN:preview.invalid}
+	handle @preview {
+		reverse_proxy api:4000
+	}
+	request_body /api/projects/zip {
+		max_size 110MB
+	}
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
